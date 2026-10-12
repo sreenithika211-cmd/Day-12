@@ -1,0 +1,96 @@
+
+# 1. Import libraries
+import tensorflow as tf
+import numpy as np
+
+# 2. Create sample light-level data
+light_levels = np.arange(0, 101, 1, dtype=np.float32)
+
+# Labels: Dark = 0, Normal = 1, Bright = 2
+labels = np.where(
+    light_levels < 30, 0,
+    np.where(light_levels < 70, 1, 2)
+).astype(np.int32)
+
+class_names = ["Dark", "Normal", "Bright"]
+
+# 3. Build the neural network
+model = tf.keras.Sequential([
+    tf.keras.layers.Input(shape=(1,)),
+    tf.keras.layers.Rescaling(1.0 / 100),
+    tf.keras.layers.Dense(16, activation="relu"),
+    tf.keras.layers.Dense(3, activation="softmax")
+])
+
+# 4. Compile the model
+model.compile(
+    optimizer="adam",
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+# 5. Train the model
+model.fit(light_levels, labels, epochs=40, verbose=0)
+
+print("Original model trained successfully!")
+
+# 6. Convert the TensorFlow model to TFLite
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+tflite_model = converter.convert()
+
+# Save the .tflite file
+with open("light_classifier.tflite", "wb") as f:
+    f.write(tflite_model)
+
+print("TFLite conversion completed!")
+print("File saved as light_classifier.tflite")
+
+# 7. Load the TFLite model
+interpreter = tf.lite.Interpreter(
+    model_path="light_classifier.tflite"
+)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# 8. Test new light-level readings
+test_values = [10, 50, 90]
+
+print("\nOriginal vs TFLite predictions:")
+
+for value in test_values:
+    input_data = np.array([[value]], dtype=np.float32)
+
+    # Original model prediction
+    original_output = model.predict(input_data, verbose=0)[0]
+
+    # TFLite model prediction
+    interpreter.set_tensor(
+        input_details[0]["index"], input_data
+    )
+    interpreter.invoke()
+
+    tflite_output = interpreter.get_tensor(
+        output_details[0]["index"]
+    )[0]
+
+    original_class = class_names[np.argmax(original_output)]
+    tflite_class = class_names[np.argmax(tflite_output)]
+
+    difference = np.max(
+        np.abs(original_output - tflite_output)
+    )
+
+    print(f"\nLight level: {value}")
+    print(f"Original model: {original_class}")
+    print(f"TFLite model:   {tflite_class}")
+    print(f"Maximum probability difference: {difference:.8f}")
+    print("Predictions match:", original_class == tflite_class)
+
+# 9. Verify all test predictions match
+print("\nTFLite inference testing completed!")
+
+# 10. Download the converted model
+from google.colab import files
+files.download("light_classifier.tflite")
